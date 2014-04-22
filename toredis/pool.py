@@ -87,8 +87,8 @@ class ClientPool(object):
 
     def close(self):
         def _close(_cache):
-            while self._cache:
-                client = self._idle_cache.popleft()
+            while _cache:
+                client = _cache.popleft()
                 try:
                     client.close()
                 except Exception as e:
