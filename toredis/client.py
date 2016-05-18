@@ -18,10 +18,25 @@ logger = logging.getLogger(__name__)
 
 
 class Client(RedisCommandsMixin):
+
+    @property
+    def host(self):
+        if hasattr(self, '_host'):
+            return self._host
+
+        return None
+
+    @property
+    def port(self):
+        if hasattr(self, '_port'):
+            return self._port
+
+        return None
+
     """
         Redis client class
     """
-    def __init__(self, io_loop=None):
+    def __init__(self, io_loop=None, pool=None, **kwargs):
         """
             Constructor
 
@@ -36,6 +51,17 @@ class Client(RedisCommandsMixin):
         self.callbacks = deque()
 
         self._sub_callback = False
+
+        self._pipeline = None
+
+        self._pool = pool
+        self._kwargs = kwargs
+
+    def _cache(self):
+        if self._pool is None:
+            return
+
+        self._pool.cache(self)
 
     def connect(self, host='localhost', port=6379, callback=None):
         """
@@ -94,7 +120,14 @@ class Client(RedisCommandsMixin):
             raise ValueError('Cannot run normal command over PUBSUB connection')
 
         # Send command
-        self._stream.write(self.format_message(args))
+        try:
+            self._stream.write(self.format_message(args))
+        except IOError as e:
+            logger.error(e)
+
+            self._cache()
+            raise e
+
         if callback is not None:
             callback = stack_context.wrap(callback)
         self.callbacks.append((callback, None))
@@ -114,7 +147,15 @@ class Client(RedisCommandsMixin):
 
         # Send command pipeline
         messages = [self.format_message(args) for args in args_pipeline]
-        self._stream.write(b"".join(messages))
+
+        try:
+            self._stream.write(b"".join(messages))
+        except IOError as e:
+            logger.error(e)
+
+            self._cache()
+            raise e
+
         if callback is not None:
             callback = stack_context.wrap(callback)
         self.callbacks.append((callback, (len(messages), [])))
@@ -181,7 +222,7 @@ class Client(RedisCommandsMixin):
     def _connect(self, sock, addr, callback):
         self._reset()
 
-        self._stream = IOStream(sock, io_loop=self._io_loop)
+        self._stream = IOStream(sock, io_loop=self._io_loop, **self._kwargs)
         self._stream.connect(addr, callback=callback)
         self._stream.read_until_close(self._on_close, self._on_read)
 
@@ -223,7 +264,12 @@ class Client(RedisCommandsMixin):
 
             resp = self.reader.gets()
 
+        if self.is_idle():
+            self._cache()
+
     def _on_close(self, data=None):
+        self._cache()
+
         if data is not None:
             self._on_read(data)
 
