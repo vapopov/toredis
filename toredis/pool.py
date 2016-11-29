@@ -9,8 +9,10 @@ logger = logging.getLogger(__name__)
 
 
 class ClientPool(object):
-    '''Redis Client Pool
-    '''
+    """" Redis Client Pool """
+
+    _client_cls = Client
+
     @property
     def stat_info(self):
         return {'pool_size': self._pool_size,
@@ -45,7 +47,7 @@ class ClientPool(object):
         kwargs = self._kwargs
         kwargs['pool'] = self
 
-        _client = Client(*self._args, **kwargs)
+        _client = self._client_cls(*self._args, **kwargs)
         _client.connect(host=self._host, port=self._port)
 
         return _client
@@ -62,8 +64,7 @@ class ClientPool(object):
             _client = self._idle_cache.popleft()
 
             if not _client.is_connected():
-                _client.connect(host=self._host,
-                port=self._port)
+                _client.connect(host=self._host, port=self._port)
         except IndexError as e:
             _client = self._new_client()
 
